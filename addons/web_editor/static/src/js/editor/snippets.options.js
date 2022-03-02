@@ -4516,17 +4516,21 @@ registry.Box = SnippetOptionWidget.extend({
         if (type) {
             el.classList.add(shadowClass);
         }
+
+        let shadow = ''; // TODO in master this should be changed to 'none'
         document.body.appendChild(el);
         switch (type) {
             case 'outset': {
-                return $(el).css('box-shadow');
+                shadow = $(el).css('box-shadow');
+                break;
             }
             case 'inset': {
-                return $(el).css('box-shadow') + ' inset';
+                shadow = $(el).css('box-shadow') + ' inset';
+                break;
             }
         }
         el.remove();
-        return ''; // TODO in master this should be changed to 'none'
+        return shadow;
     }
 });
 
@@ -4717,17 +4721,17 @@ registry.ReplaceMedia = SnippetOptionWidget.extend({
     /**
      * @override
      */
-    async start() {
+    onFocus() {
         core.bus.on('activate_image_link_tool', this, this._activateLinkTool);
-        return this._super(...arguments);
+        // When we start editing an image, rerender the UI to ensure the
+        // we-select that suggests the anchors is in a consistent state.
+        this.rerender = true;
     },
     /**
      * @override
      */
-    onFocus() {
-        // When we start editing an image, rerender the UI to ensure the
-        // we-select that suggests the anchors is in a consistent state.
-        this.rerender = true;
+    onBlur() {
+        core.bus.off('activate_image_link_tool', this, this._activateLinkTool);
     },
 
     //--------------------------------------------------------------------------

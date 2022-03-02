@@ -209,10 +209,7 @@ const Wysiwyg = Widget.extend({
 
         if (options.snippets) {
             $(this.odooEditor.document.body).addClass('editor_enable');
-            this.snippetsMenu = new snippetsEditor.SnippetsMenu(this, Object.assign({
-                wysiwyg: this,
-                selectorEditableArea: '.o_editable',
-            }, options));
+            this.snippetsMenu = this._createSnippetsMenuInstance(options);
             await this._insertSnippetMenu();
 
             this._onBeforeUnload = (event) => {
@@ -239,10 +236,10 @@ const Wysiwyg = Widget.extend({
         this._updateEditorUI();
 
         this.$root.on('click', (ev) => {
-            const $target = $(ev.target);
+            const $target = $(ev.target).closest('a');
 
             // Keep popover open if clicked inside it, but not on a button
-            if ($target.parents('.o_edit_menu_popover').length && !$target.parent('a').addBack('a').length) {
+            if ($(ev.target).parents('.o_edit_menu_popover').length && !$target.length) {
                 ev.preventDefault();
             }
 
@@ -263,7 +260,7 @@ const Wysiwyg = Widget.extend({
                             // here relies on clicking in that editor panel...
                             await this.snippetsMenu._mutex.exec(() => null);
                         }
-                        this.linkPopover = await weWidgets.LinkPopoverWidget.createFor(this, ev.target, { wysiwyg: this });
+                        this.linkPopover = await weWidgets.LinkPopoverWidget.createFor(this, $target[0], { wysiwyg: this });
                         $target.data('popover-widget-initialized', this.linkPopover);
                     })();
                 }
@@ -550,7 +547,15 @@ const Wysiwyg = Widget.extend({
     renderElement: function () {
         this.$editable = this.options.editable || $('<div class="note-editable">');
         this.$root = this.$editable;
-
+        if (this.options.height) {
+            this.$editable.height(this.options.height);
+        }
+        if (this.options.minHeight) {
+            this.$editable.css('min-height', this.options.minHeight);
+        }
+        if (this.options.maxHeight && this.options.maxHeight > 10) {
+            this.$editable.css('max-height', this.options.maxHeight);
+        }
         if (this.options.resizable && !device.isMobile) {
             const $wrapper = $('<div class="o_wysiwyg_wrapper odoo-editor">');
             this.$root = $wrapper;
@@ -933,7 +938,9 @@ const Wysiwyg = Widget.extend({
             const linkDialog = new weWidgets.LinkDialog(this, {
                 forceNewWindow: this.options.linkForceNewWindow,
                 wysiwyg: this,
-            }, this.$editable[0], {}, undefined, options.link);
+            }, this.$editable[0], {
+                needLabel: true,
+            }, undefined, options.link);
             const restoreSelection = preserveCursor(this.odooEditor.document);
             linkDialog.open();
             linkDialog.on('save', this, data => {
@@ -1038,8 +1045,21 @@ const Wysiwyg = Widget.extend({
     // Private
     //--------------------------------------------------------------------------
 
+    /**
+     * Returns an instance of the snippets menu.
+     *
+     * @param {Object} [options]
+     * @returns {widget}
+     */
+    _createSnippetsMenuInstance: function (options={}) {
+        return new snippetsEditor.SnippetsMenu(this, Object.assign({
+            wysiwyg: this,
+            selectorEditableArea: '.o_editable',
+        }, options));
+    },
     _configureToolbar: function (options) {
         const $toolbar = this.toolbar.$el;
+        $toolbar.find('.btn-group').on('mousedown', e => e.preventDefault());
         const openTools = e => {
             e.preventDefault();
             e.stopImmediatePropagation();
@@ -1205,6 +1225,10 @@ const Wysiwyg = Widget.extend({
             const eventName = elem.dataset.eventName;
             let colorpicker = null;
             const mutex = new concurrency.MutexedDropPrevious();
+            if (!elem.ownerDocument.defaultView) {
+                // In case the element is not in the DOM, don't do anything with it.
+                continue;
+            }
             // If the element is within an iframe, access the jquery loaded in
             // the iframe because it is the one who will trigger the dropdown
             // events (i.e hide.bs.dropdown and show.bs.dropdown).
@@ -1312,7 +1336,7 @@ const Wysiwyg = Widget.extend({
         // Open the link tool when CTRL+K is pressed.
         if (e && e.key === 'k' && (e.ctrlKey || e.metaKey)) {
             e.preventDefault();
-            const targetEl = this.odooEditor.document.getSelection().baseNode; // FIXME this is undefined on Firefox after clicking on an image and hitting CTRL-K
+            const targetEl = this.odooEditor.document.getSelection().getRangeAt(0).startContainer;
             // Link tool is different if the selection is an image or a text.
             if (targetEl instanceof HTMLElement
                     && (targetEl.tagName === 'IMG' || targetEl.querySelectorAll('img').length === 1)) {
