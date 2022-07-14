@@ -12,7 +12,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Odoo Server 15.0\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2021-11-16 13:18+0000\n"
+"POT-Creation-Date: 2022-01-24 08:19+0000\n"
 "PO-Revision-Date: 2021-09-14 12:24+0000\n"
 "Last-Translator: Braulio D. López Vázquez <bdl@odoo.com>, 2022\n"
 "Language-Team: Spanish (Mexico) (https://www.transifex.com/odoo/teams/41243/es_MX/)\n"
@@ -20,7 +20,7 @@ msgstr ""
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: \n"
 "Language: es_MX\n"
-"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"Plural-Forms: nplurals=3; plural=n == 1 ? 0 : n != 0 && n % 1000000 == 0 ? 1 : 2;\n"
 
 #. module: mrp
 #: model:ir.model.fields,help:mrp.field_mrp_production__state
@@ -88,12 +88,6 @@ msgstr "%i órdenes de trabajo"
 #, python-format
 msgid "%s %s unbuilt in"
 msgstr "%s %s desmantelado en"
-
-#. module: mrp
-#: code:addons/mrp/models/mrp_routing.py:0
-#, python-format
-msgid "%s (copy)"
-msgstr "%s (copia)"
 
 #. module: mrp
 #: code:addons/mrp/models/mrp_bom.py:0
@@ -1119,11 +1113,9 @@ msgstr "Componente"
 #: code:addons/mrp/models/mrp_production.py:0
 #, python-format
 msgid ""
-"Component Lots must be unique for mass production. Please review consumption"
+"Component Lots must be unique for mass production. Please review reservation"
 " for:\n"
 msgstr ""
-"Los lotes de componentes deben ser únicos para la producción en masa. "
-"Compruebe el consumo para:\n"
 
 #. module: mrp
 #: model:ir.model.fields,field_description:mrp.field_mrp_production__components_availability
@@ -1811,12 +1803,6 @@ msgid "Expected duration (in minutes)"
 msgstr "Duración esperada (en minutos)"
 
 #. module: mrp
-#: code:addons/mrp/models/mrp_production.py:0
-#, python-format
-msgid "Expected product tracked by Serial Number."
-msgstr "Productos esperados rastreados por número de serie."
-
-#. module: mrp
 #: model:ir.model.fields,field_description:mrp.field_mrp_document__datas
 msgid "File Content (base64)"
 msgstr "Contenido del archivo (base64)"
@@ -2308,6 +2294,17 @@ msgstr "¿El usuario actual está trabajando?"
 #, python-format
 msgid "It has already been unblocked."
 msgstr "Ya ha sido desbloqueado."
+
+#. module: mrp
+#: code:addons/mrp/models/mrp_workorder.py:0
+#, python-format
+msgid ""
+"It is not possible to unplan one single Work Order. You should unplan the "
+"Manufacturing Order instead in order to unplan all the linked operations."
+msgstr ""
+"No es posible anular la planeación de una sola orden de trabajo. En su "
+"lugar, debe anular la planeación de la orden de fabricación para anular la "
+"todas las operaciones vinculadas."
 
 #. module: mrp
 #: model:ir.model.fields,field_description:mrp.field_mrp_production__is_planned
@@ -3076,14 +3073,20 @@ msgstr "Número de mensajes con error de envío"
 #. module: mrp
 #: model:ir.model.fields,help:mrp.field_mrp_workcenter__capacity
 msgid ""
-"Number of pieces that can be produced in parallel. In case the work center "
-"has a capacity of 5 and you have to produce 10 units on your work order, the"
-" usual operation time will be multiplied by 2."
+"Number of pieces (in product UoM) that can be produced in parallel  (at the "
+"same time) at this work center. For example: the capacity is 5 and you need "
+"to produce 10 units, then the operation time listed on the BOM will be "
+"multiplied by two. However, note that both time before and after production "
+"will only be counted once. "
 msgstr ""
-"Número de piezas que se pueden producir en paralelo. En caso de que el "
-"centro de trabajo tenga una capacidad de 5 y tenga que producir 10 unidades "
-"en su orden de trabajo, el tiempo de operación habitual se multiplicará por "
-"2."
+
+#. module: mrp
+#: model:ir.model.fields,help:mrp.field_mrp_bom__product_qty
+msgid ""
+"This should be the smallest quantity that this product can be produced in. "
+"If the BOM contains operations, make sure the work center capacity is "
+"accurate. "
+msgstr ""
 
 #. module: mrp
 #: model:ir.model.fields,field_description:mrp.field_mrp_production__mrp_production_source_count
@@ -4511,6 +4514,12 @@ msgstr ""
 "que la del formulario de producto."
 
 #. module: mrp
+#: code:addons/mrp/models/mrp_workcenter.py:0
+#, python-format
+msgid "The Workorder (%s) cannot be started twice!"
+msgstr "¡La orden de trabajo (%s) no se puede iniciar dos veces!"
+
+#. module: mrp
 #: code:addons/mrp/models/mrp_bom.py:0
 #, python-format
 msgid ""
@@ -4581,6 +4590,18 @@ msgstr ""
 "La fecha de finalización planeada de la orden de trabajo no puede ser "
 "anterior a la fecha de inicio planeada, corríjala para guardar la orden de "
 "trabajo."
+
+#. module: mrp
+#: code:addons/mrp/models/mrp_bom.py:0
+#, python-format
+msgid ""
+"The product has already been used at least once, editing its structure may "
+"lead to undesirable behaviours. You should rather archive the product and "
+"create a new one with a new bill of materials."
+msgstr ""
+"El producto ya se usó al menos una vez, editar su estructura puede llevar a "
+"comportamientos no deseados. Archive el producto y cree uno nuevo con una "
+"nueva lista de materiales."
 
 #. module: mrp
 #: code:addons/mrp/models/mrp_production.py:0
@@ -4956,6 +4977,12 @@ msgstr "Tipo de operación"
 #: model:ir.model.fields,help:mrp.field_mrp_unbuild__activity_exception_decoration
 msgid "Type of the exception activity on record."
 msgstr "Tipo de actividad de excepción registrada."
+
+#. module: mrp
+#: code:addons/mrp/models/mrp_production.py:0
+#, python-format
+msgid "Unable to split with more than the quantity to produce."
+msgstr "No se puede dividir con más de la cantidad para producir."
 
 #. module: mrp
 #: model_terms:ir.ui.view,arch_db:mrp.mrp_production_workorder_tree_editable_view
@@ -5654,12 +5681,6 @@ msgstr "No puede vincular esta orden de trabajo a otra orden de fabricación."
 msgid "You cannot move a manufacturing order once it is cancelled or done."
 msgstr ""
 "No puede mover una orden de fabricación una vez que se cancela o termina."
-
-#. module: mrp
-#: code:addons/mrp/models/mrp_production.py:0
-#, python-format
-msgid "Unable to split with more than the quantity to produce."
-msgstr "No se puede dividir con más de la cantidad para producir."
 
 #. module: mrp
 #: code:addons/mrp/models/mrp_workorder.py:0

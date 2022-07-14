@@ -2,6 +2,7 @@
 # Part of Odoo. See LICENSE file for full copyright and licensing details.
 
 import re
+from markupsafe import Markup
 from odoo import api, fields, Command, models, _
 from odoo.exceptions import UserError, ValidationError
 from odoo.tools import email_split, float_is_zero, float_repr
@@ -54,27 +55,28 @@ class HrExpense(models.Model):
         return res
 
     name = fields.Char('Description', compute='_compute_from_product_id_company_id', store=True, required=True, copy=True,
-        states={'draft': [('readonly', False)], 'reported': [('readonly', False)], 'refused': [('readonly', False)]})
-    date = fields.Date(readonly=True, states={'draft': [('readonly', False)], 'reported': [('readonly', False)], 'refused': [('readonly', False)]}, default=fields.Date.context_today, string="Expense Date")
+        states={'draft': [('readonly', False)], 'reported': [('readonly', False)], 'approved': [('readonly', False)], 'refused': [('readonly', False)]})
+    date = fields.Date(readonly=True, states={'draft': [('readonly', False)], 'reported': [('readonly', False)], 'approved': [('readonly', False)], 'refused': [('readonly', False)]}, default=fields.Date.context_today, string="Expense Date")
     accounting_date = fields.Date(string="Accounting Date", related='sheet_id.accounting_date', store=True, groups='account.group_account_invoice,account.group_account_readonly')
     employee_id = fields.Many2one('hr.employee', compute='_compute_employee_id', string="Employee",
         store=True, required=True, readonly=False, tracking=True,
         states={'approved': [('readonly', True)], 'done': [('readonly', True)]},
         default=_default_employee_id, domain=lambda self: self._get_employee_id_domain(), check_company=True)
     # product_id not required to allow create an expense without product via mail alias, but should be required on the view.
-    product_id = fields.Many2one('product.product', string='Product', readonly=True, tracking=True, states={'draft': [('readonly', False)], 'reported': [('readonly', False)], 'refused': [('readonly', False)]}, domain="[('can_be_expensed', '=', True), '|', ('company_id', '=', False), ('company_id', '=', company_id)]", ondelete='restrict')
+    product_id = fields.Many2one('product.product', string='Product', readonly=True, tracking=True, states={'draft': [('readonly', False)], 'reported': [('readonly', False)], 'approved': [('readonly', False)], 'refused': [('readonly', False)]}, domain="[('can_be_expensed', '=', True), '|', ('company_id', '=', False), ('company_id', '=', company_id)]", ondelete='restrict')
     product_uom_id = fields.Many2one('uom.uom', string='Unit of Measure', compute='_compute_from_product_id_company_id',
         store=True, copy=True, states={'draft': [('readonly', False)], 'refused': [('readonly', False)]},
         default=_default_product_uom_id, domain="[('category_id', '=', product_uom_category_id)]")
     product_uom_category_id = fields.Many2one(related='product_id.uom_id.category_id', readonly=True, string="UoM Category")
     unit_amount = fields.Float("Unit Price", compute='_compute_from_product_id_company_id', store=True, required=True, copy=True,
-        states={'draft': [('readonly', False)], 'reported': [('readonly', False)], 'refused': [('readonly', False)]}, digits='Product Price')
-    quantity = fields.Float(required=True, readonly=True, states={'draft': [('readonly', False)], 'reported': [('readonly', False)], 'refused': [('readonly', False)]}, digits='Product Unit of Measure', default=1)
+        states={'draft': [('readonly', False)], 'reported': [('readonly', False)], 'approved': [('readonly', False)], 'refused': [('readonly', False)]}, digits='Product Price')
+    quantity = fields.Float(required=True, readonly=True, states={'draft': [('readonly', False)], 'reported': [('readonly', False)], 'approved': [('readonly', False)], 'refused': [('readonly', False)]}, digits='Product Unit of Measure', default=1)
     tax_ids = fields.Many2many('account.tax', 'expense_tax', 'expense_id', 'tax_id',
         compute='_compute_from_product_id_company_id', store=True, readonly=False,
-        domain="[('company_id', '=', company_id), ('type_tax_use', '=', 'purchase')]", string='Taxes')
+        domain="[('company_id', '=', company_id), ('type_tax_use', '=', 'purchase'), ('price_include', '=', True)]", string='Taxes',
+        help="The taxes should be \"Included In Price\"")
     # TODO SGV can be removed
-    untaxed_amount = fields.Float("Subtotal", store=True, compute='_compute_amount', digits='Account')
+    untaxed_amount = fields.Float("Subtotal", store=True, compute='_compute_amount_tax', digits='Account', copy=True)
     amount_residual = fields.Monetary(string='Amount Due', compute='_compute_amount_residual')
     total_amount = fields.Monetary("Total In Currency", compute='_compute_amount', store=True, currency_field='currency_id', tracking=True, readonly=False)
     company_currency_id = fields.Many2one('res.currency', string="Report Company Currency", related='company_id.currency_id', readonly=True)
@@ -99,6 +101,7 @@ class HrExpense(models.Model):
         ('refused', 'Refused')
     ], compute='_compute_state', string='Status', copy=False, index=True, readonly=True, store=True, default='draft', help="Status of the expense.")
     sheet_id = fields.Many2one('hr.expense.sheet', string="Expense Report", domain="[('employee_id', '=', employee_id), ('company_id', '=', company_id)]", readonly=True, copy=False)
+    sheet_is_editable = fields.Boolean(compute='_compute_sheet_is_editable')
     approved_by = fields.Many2one('res.users', string='Approved By', related='sheet_id.user_id')
     approved_on = fields.Datetime(string='Approved On', related='sheet_id.approval_date')
     reference = fields.Char("Bill Reference")
@@ -152,9 +155,20 @@ class HrExpense(models.Model):
     @api.depends('quantity', 'unit_amount', 'tax_ids', 'currency_id')
     def _compute_amount(self):
         for expense in self:
-            expense.untaxed_amount = expense.unit_amount * expense.quantity
-            taxes = expense.tax_ids.compute_all(expense.unit_amount, expense.currency_id, expense.quantity, expense.product_id, expense.employee_id.user_id.partner_id)
-            expense.total_amount = taxes.get('total_included')
+            if expense.unit_amount:
+                taxes = expense.tax_ids.compute_all(expense.unit_amount, expense.currency_id, expense.quantity, expense.product_id, expense.employee_id.user_id.partner_id)
+                expense.total_amount = taxes.get('total_included')
+
+    @api.depends('total_amount', 'tax_ids', 'currency_id')
+    def _compute_amount_tax(self):
+        for expense in self:
+            # the taxes should be "Included In Price", as the entered
+            # total_amount includes all the taxes already
+            # for the cases with total price, the quantity is always 1
+            amount = expense.total_amount
+            quantity = 1
+            taxes = expense.tax_ids.compute_all(amount, expense.currency_id, quantity, expense.product_id, expense.employee_id.user_id.partner_id)
+            expense.untaxed_amount = taxes.get('total_excluded')
 
     @api.depends("sheet_id.account_move_id.line_ids")
     def _compute_amount_residual(self):
@@ -167,7 +181,7 @@ class HrExpense(models.Model):
             else:
                 residual_field = 'amount_residual_currency'
             payment_term_lines = expense.sheet_id.account_move_id.sudo().line_ids \
-                .filtered(lambda line: line.expense_id == self and line.account_internal_type in ('receivable', 'payable'))
+                .filtered(lambda line: line.expense_id == expense and line.account_internal_type in ('receivable', 'payable'))
             expense.amount_residual = -sum(payment_term_lines.mapped(residual_field))
 
     @api.depends('date', 'total_amount', 'currency_id', 'company_currency_id')
@@ -210,6 +224,11 @@ class HrExpense(models.Model):
                 expense.is_editable = is_account_manager
             else:
                 expense.is_editable = False
+
+    @api.depends('sheet_id.is_editable', 'sheet_id')
+    def _compute_sheet_is_editable(self):
+        for expense in self:
+            expense.sheet_is_editable = not expense.sheet_id or expense.sheet_id.is_editable
 
     @api.depends('employee_id')
     def _compute_is_ref_editable(self):
@@ -278,6 +297,10 @@ class HrExpense(models.Model):
         )
         self.analytic_account_id = self.analytic_account_id or rec.analytic_id.id
         self.analytic_tag_ids = self.analytic_tag_ids or rec.analytic_tag_ids.ids
+
+    @api.constrains('payment_mode')
+    def _check_payment_mode(self):
+        self.sheet_id._check_payment_mode()
 
     @api.constrains('product_id', 'product_uom_id')
     def _check_product_uom_category(self):
@@ -352,17 +375,17 @@ class HrExpense(models.Model):
 
     @api.model
     def get_empty_list_help(self, help_message):
-        return super(HrExpense, self).get_empty_list_help(help_message + self._get_empty_list_mail_alias())
+        return super(HrExpense, self).get_empty_list_help(help_message or '' + self._get_empty_list_mail_alias())
 
     @api.model
     def _get_empty_list_mail_alias(self):
         use_mailgateway = self.env['ir.config_parameter'].sudo().get_param('hr_expense.use_mailgateway')
         alias_record = use_mailgateway and self.env.ref('hr_expense.mail_alias_expense') or False
         if alias_record and alias_record.alias_domain and alias_record.alias_name:
-            return """
+            return Markup("""
 <p>
 Or send your receipts at <a href="mailto:%(email)s?subject=Lunch%%20with%%20customer%%3A%%20%%2412.32">%(email)s</a>.
-</p>""" % {'email': '%s@%s' % (alias_record.alias_name, alias_record.alias_domain)}
+</p>""") % {'email': '%s@%s' % (alias_record.alias_name, alias_record.alias_domain)}
         return ""
 
     # ----------------------------------------

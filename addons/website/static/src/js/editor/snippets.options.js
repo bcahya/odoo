@@ -11,6 +11,7 @@ const weUtils = require('web_editor.utils');
 var options = require('web_editor.snippets.options');
 const wLinkPopoverWidget = require('@website/js/widgets/link_popover_widget')[Symbol.for("default")];
 const wUtils = require('website.utils');
+const {isImageSupportedForStyle} = require('web_editor.image_processing');
 require('website.s_popup_options');
 
 var _t = core._t;
@@ -594,6 +595,21 @@ options.Class.include({
         const enableDataKeys = value.split(/\s*,\s*/);
         const disableDataKeys = allDataKeys.filter(value => !enableDataKeys.includes(value));
         const resetViewArch = !!params.resetViewArch;
+
+        if (params.name === 'header_sidebar_opt') {
+            // When the user selects sidebar as header, make sure that the
+            // header position is regular.
+            // TODO we should avoid having that `if` in the generic option
+            // class (maybe simply use data-trigger but the header template
+            // option as no associated data-js to hack). To adapt in master.
+            await new Promise(resolve => {
+                this.trigger_up('action_demand', {
+                    actionName: 'toggle_page_option',
+                    params: [{name: 'header_overlay', value: false}],
+                    onSuccess: () => resolve(),
+                });
+            });
+        }
 
         return this._rpc({
             route: '/website/theme_customize_data',
@@ -2086,11 +2102,12 @@ const VisibilityPageOptionUpdate = options.Class.extend({
      */
     async visibility(previewMode, widgetValue, params) {
         const show = (widgetValue !== 'hidden');
-        await new Promise(resolve => {
+        await new Promise((resolve, reject) => {
             this.trigger_up('action_demand', {
                 actionName: 'toggle_page_option',
                 params: [{name: this.pageOptionName, value: show}],
                 onSuccess: () => resolve(),
+                onFailure: reject,
             });
         });
         this.trigger_up('snippet_option_visibility_update', {show: show});
@@ -2115,11 +2132,12 @@ const VisibilityPageOptionUpdate = options.Class.extend({
      * @returns {boolean}
      */
     async _isShown() {
-        return new Promise(resolve => {
+        return new Promise((resolve, reject) => {
             this.trigger_up('action_demand', {
                 actionName: 'get_page_option',
                 params: [this.pageOptionName],
                 onSuccess: v => resolve(!!v),
+                onFailure: reject,
             });
         });
     },
@@ -2160,21 +2178,23 @@ options.registry.TopMenuVisibility = VisibilityPageOptionUpdate.extend({
             return;
         }
         const transparent = (widgetValue === 'transparent');
-        await new Promise(resolve => {
+        await new Promise((resolve, reject) => {
             this.trigger_up('action_demand', {
                 actionName: 'toggle_page_option',
                 params: [{name: 'header_overlay', value: transparent}],
                 onSuccess: () => resolve(),
+                onFailure: reject,
             });
         });
         if (!transparent) {
             return;
         }
-        await new Promise(resolve => {
+        await new Promise((resolve, reject) => {
             this.trigger_up('action_demand', {
                 actionName: 'toggle_page_option',
                 params: [{name: 'header_color', value: ''}],
                 onSuccess: () => resolve(),
+                onFailure: reject,
             });
         });
     },
@@ -2184,15 +2204,35 @@ options.registry.TopMenuVisibility = VisibilityPageOptionUpdate.extend({
     async _computeWidgetState(methodName, params) {
         const _super = this._super.bind(this);
         if (methodName === 'visibility') {
-            this.shownValue = await new Promise(resolve => {
+            this.shownValue = await new Promise((resolve, reject) => {
                 this.trigger_up('action_demand', {
                     actionName: 'get_page_option',
                     params: ['header_overlay'],
                     onSuccess: v => resolve(v ? 'transparent' : 'regular'),
+                    onFailure: reject,
                 });
             });
         }
         return _super(...arguments);
+    },
+    /**
+     * @override
+     */
+    _computeWidgetVisibility(widgetName, params) {
+        if (widgetName === 'header_visibility_opt') {
+            return this.$target[0].classList.contains('o_header_sidebar') ? '' : 'true';
+        }
+        return this._super(...arguments);
+    },
+    /**
+     * @override
+     */
+    _renderCustomXML(uiFragment) {
+        // TODO in master: put this in the XML.
+        const weSelectEl = uiFragment.querySelector('we-select#option_header_visibility');
+        if (weSelectEl) {
+            weSelectEl.dataset.name = 'header_visibility_opt';
+        }
     },
 });
 
@@ -2226,11 +2266,12 @@ options.registry.topMenuColor = options.Class.extend({
         if (!show) {
             return false;
         }
-        return new Promise(resolve => {
+        return new Promise((resolve, reject) => {
             this.trigger_up('action_demand', {
                 actionName: 'get_page_option',
                 params: ['header_overlay'],
                 onSuccess: value => resolve(!!value),
+                onFailure: reject,
             });
         });
     },
@@ -2674,9 +2715,7 @@ options.registry.CoverProperties = options.Class.extend({
      */
     _updateColorDataset(bgColorStyle = '', bgColorClass = '') {
         this.$target[0].dataset.bgColorStyle = bgColorStyle;
-        if (bgColorClass) {
-            this.$target[0].dataset.bgColorClass = bgColorClass;
-        }
+        this.$target[0].dataset.bgColorClass = bgColorClass;
     },
     /**
      * Updates the cover properties dataset used for saving.
@@ -2685,15 +2724,6 @@ options.registry.CoverProperties = options.Class.extend({
      */
     _updateSavingDataset(colorValue) {
         const [colorPickerWidget, sizeWidget, textAlignWidget] = this._requestUserValueWidgets('bg_color_opt', 'size_opt', 'text_align_opt');
-        if (!colorPickerWidget) {
-            // Saving without closing the color palette, but the last picked
-            // color was already taken into account (we still need to update the
-            // dataset when a custom color is selected).
-            if (colorValue) {
-                this._updateColorDataset(`background-color: ${colorValue};`);
-            }
-            return;
-        }
         // TODO: `o_record_has_cover` should be handled using model field, not
         // resize_class to avoid all of this.
         // Get values from DOM (selected values in options are only available
@@ -2726,7 +2756,7 @@ options.registry.CoverProperties = options.Class.extend({
         if (ccValue) {
             colorNames.push(ccValue);
         }
-        if (!isGradient && !isCSSColor) {
+        if (colorOrGradient && !isGradient && !isCSSColor) {
             colorNames.push(colorOrGradient);
         }
         const bgColorClass = weUtils.computeColorClasses(colorNames).join(' ');
@@ -3088,15 +3118,6 @@ options.registry.WebsiteAnimate = options.Class.extend({
             this.$target.toggleClass('o_animate_preview o_animate', !!widgetValue);
         }
     },
-    /**
-     * @override
-     */
-    async _computeWidgetVisibility(widgetName, params) {
-        if (widgetName === 'animation_launch_opt') {
-            return !this.$target[0].closest('.dropdown');
-        }
-        return this._super(...arguments);
-    },
 
     //--------------------------------------------------------------------------
     // Private
@@ -3124,6 +3145,18 @@ options.registry.WebsiteAnimate = options.Class.extend({
     _computeWidgetVisibility(widgetName, params) {
         if (widgetName === 'no_animation_opt') {
             return !this.isAnimatedText;
+        }
+        if (widgetName === 'animation_launch_opt') {
+            return !this.$target[0].closest('.dropdown');
+        }
+        return this._super(...arguments);
+    },
+    /**
+     * @override
+     */
+    _computeVisibility(methodName, params) {
+        if (this.$target[0].matches('img')) {
+            return isImageSupportedForStyle(this.$target[0]);
         }
         return this._super(...arguments);
     },
